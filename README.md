@@ -45,3 +45,30 @@ Avoids double-billing on Codex / ChatGPT Mac subscription.
 
 Extracted from a personal Claude Code skill collection on 2026-05-11.
 See `SKILL.md` for full behavior spec.
+
+## Install
+
+```bash
+git clone https://github.com/asharma567/second-opinion ~/second-opinion
+~/second-opinion/scripts/install.sh
+```
+
+The installer is idempotent — re-run any time to re-check state.
+
+## Docs
+
+- [`SKILL.md`](SKILL.md) — full routing rules and provider notes
+- [`AGENTS.md`](AGENTS.md) — guidance for AI agents invoking this skill
+- [`CONTEXT.md`](CONTEXT.md) — origin story and design philosophy
+- [`COMPARISON.md`](COMPARISON.md) — vs `llm`, OpenRouter, aichat, claude-router, udit/autoresearch
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — adding adapters, style, what we won't merge
+- [`guide/`](guide/) — per-provider and per-mode deep-dives
+- [`LICENSE`](LICENSE) — MIT
+
+## Tests
+
+```bash
+./scripts/run-tests.sh
+```
+
+Offline tests only (classification routing, output-contract conformance). Live API tests are not in CI — they cost money and need real keys.
