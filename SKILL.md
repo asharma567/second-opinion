@@ -79,15 +79,50 @@ Keys auto-load from `~/.openclaw-tgpkb/secrets/<provider>_api_key` if env vars a
 
 Run `scripts/auth-check.sh` to verify each provider is reachable.
 
+## :reason — adversarial refinement subcommand
+
+`/second-opinion:reason` runs a cold-start multi-agent loop modeled on `/autoresearch:reason`,
+but with cross-provider judges instead of all-Claude subagents.
+
+```bash
+# default: 3 judges, convergence=3, mode=convergent, domain=software
+~/.claude/skills/second-opinion/scripts/reason.sh "should we use event sourcing for orders"
+
+# bounded debate (no synthesis), 5 judges
+~/.claude/skills/second-opinion/scripts/reason.sh \
+  --mode debate --judges 5 --iterations 4 \
+  --domain product "monetize free tier vs paid-only launch"
+```
+
+Role mapping (defaults; degrades when fewer providers configured):
+
+| Role | Default provider | Why |
+|---|---|---|
+| Author-A | codex | Strong general reasoning, sub-routed |
+| Critic | grok | Direct, low-hedge — fits adversarial role |
+| Author-B | gemini | Different lineage / training distribution |
+| Synthesizer | codex | Engineering-style merge |
+| Judges | rotate {codex, grok, gemini, openrouter} | Cross-provider blind panel |
+
+Each invocation is a fresh adapter subprocess — no history bleed. Sequential execution
+throughout (droplet 2GB constraint, no parallel calls).
+
+Outputs land in `reason-runs/{YYMMDD-HHMM}-{slug}/` with `overview.md`, `lineage.md`,
+`candidates.md`, `judge-transcripts.md`, `reason-results.tsv`, `reason-lineage.jsonl`,
+`handoff.json`. The `handoff.json` describes suggested chain targets but does not
+auto-execute them (chains are autoresearch commands, separate skills).
+
 ## Files
 
 ```
 second-opinion/
 ├── SKILL.md                        # this file
+├── reason-runs/                    # output dirs from /second-opinion:reason runs
 └── scripts/
-    ├── dispatch.sh                 # entry point: parses args, routes
+    ├── dispatch.sh                 # entry point for single-shot / fanout
     ├── classify.sh                 # keyword router
     ├── fanout.sh                   # parallel call + synthesize
+    ├── reason.sh                   # adversarial refinement loop (:reason subcommand)
     ├── auth-check.sh               # verify each provider's auth
     └── adapters/
         ├── codex.sh                # OpenAI / Codex CLI (rides on ChatGPT sub)

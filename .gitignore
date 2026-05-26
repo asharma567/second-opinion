@@ -7,3 +7,6 @@ node_modules/
 __pycache__/
 *.pyc
 autoresearch-results.tsv
+
+# :reason run outputs — local artifacts, not for the repo
+reason-runs/
