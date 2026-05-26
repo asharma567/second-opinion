@@ -29,6 +29,18 @@ if [[ "$deep" == "1" ]]; then
   full_prompt="[deep-research mode requested — provide thorough multi-source reasoning]"$'\n\n'"$full_prompt"
 fi
 
+# Use --output-last-message to extract just the final assistant message, avoiding
+# the CLI banner / workdir info / echoed prompt / transport-error noise that the
+# default stdout includes. The session log still goes to stdout (discarded).
+msg_file="$(mktemp -t second-opinion-codex.XXXXXX)"
+trap 'rm -f "$msg_file"' EXIT
+
 echo "=== provider: codex ==="
-codex exec --skip-git-repo-check "$full_prompt" 2>&1
+if codex exec --skip-git-repo-check --output-last-message "$msg_file" "$full_prompt" >/dev/null 2>&1; then
+  cat "$msg_file"
+else
+  # Fall back to noisy stdout if --output-last-message produced nothing useful
+  echo "[codex] --output-last-message empty; falling back to stdout (may include banner)" >&2
+  codex exec --skip-git-repo-check "$full_prompt" 2>&1
+fi
 echo "=== end ==="
