@@ -19,6 +19,22 @@ fall_through_to_openrouter() {
   exit 4
 }
 
+# Gemini direct API is disabled by default: the Google Cloud billing account tied
+# to GEMINI_API_KEY is suspended ("prepayment credits depleted"), so the direct
+# call fails on every invocation and only wastes a round-trip before falling
+# through. Route the gemini role straight to OpenRouter's google/gemini-2.5-pro.
+# Set SECOND_OPINION_GEMINI_DIRECT=1 to re-enable the direct call once the
+# Google Cloud billing dispute is resolved (see PER-18).
+if [[ "${SECOND_OPINION_GEMINI_DIRECT:-0}" != "1" ]]; then
+  if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+    echo "[gemini] direct API disabled (billing suspended) — routing to OpenRouter (model=${OPENROUTER_MODEL:-google/gemini-2.5-pro})" >&2
+    OPENROUTER_MODEL="${OPENROUTER_MODEL:-google/gemini-2.5-pro}" \
+      exec "$ADAPTERS/openrouter.sh" "$prompt"
+  fi
+  echo "error: gemini direct API disabled and OPENROUTER_API_KEY not set for routing" >&2
+  exit 4
+fi
+
 if [[ -z "${GEMINI_API_KEY:-}" ]]; then
   fall_through_to_openrouter "GEMINI_API_KEY not set"
 fi
