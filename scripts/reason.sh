@@ -432,7 +432,7 @@ extract_judge_vote() {
   grep -iE '^WINNER:[[:space:]]*[XYZ]' "$f" 2>/dev/null \
     | head -1 \
     | sed -E 's/^WINNER:[[:space:]]*([XYZ]).*/\1/I' \
-    | tr 'a-z' 'A-Z'
+    | tr 'a-z' 'A-Z' || true
 }
 
 extract_judge_runner_up() {
@@ -440,7 +440,7 @@ extract_judge_runner_up() {
   grep -iE '^RUNNER-UP:[[:space:]]*[XYZ]' "$f" 2>/dev/null \
     | head -1 \
     | sed -E 's/^RUNNER-UP:[[:space:]]*([XYZ]).*/\1/I' \
-    | tr 'a-z' 'A-Z'
+    | tr 'a-z' 'A-Z' || true
 }
 
 # Label-map lookup without associative arrays.
