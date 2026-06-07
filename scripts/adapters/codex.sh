@@ -24,9 +24,13 @@ if [[ -n "$system_preamble" ]]; then
   full_prompt="$system_preamble"$'\n\n'"$prompt"
 fi
 
-# TODO: when OpenAI Deep Research is exposed via codex CLI, wire --deep-research to it
+# Deep-research mode: enable codex's native live web search (Responses web_search
+# tool, exposed via `codex exec --search`) so codex grounds its answer in real
+# sources like the other providers, instead of just being nudged via text.
+search_flag=()
 if [[ "$deep" == "1" ]]; then
-  full_prompt="[deep-research mode requested — provide thorough multi-source reasoning]"$'\n\n'"$full_prompt"
+  search_flag=(--search)
+  full_prompt="[deep-research mode: use live web search; ground claims in sources and cite them]"$'\n\n'"$full_prompt"
 fi
 
 # Use --output-last-message to extract just the final assistant message, avoiding
@@ -35,12 +39,12 @@ fi
 msg_file="$(mktemp -t second-opinion-codex.XXXXXX)"
 trap 'rm -f "$msg_file"' EXIT
 
-echo "=== provider: codex ==="
-if codex exec --skip-git-repo-check --output-last-message "$msg_file" "$full_prompt" >/dev/null 2>&1; then
+echo "=== provider: codex (deep=$deep) ==="
+if codex exec --skip-git-repo-check ${search_flag[@]+"${search_flag[@]}"} --output-last-message "$msg_file" "$full_prompt" >/dev/null 2>&1; then
   cat "$msg_file"
 else
   # Fall back to noisy stdout if --output-last-message produced nothing useful
   echo "[codex] --output-last-message empty; falling back to stdout (may include banner)" >&2
-  codex exec --skip-git-repo-check "$full_prompt" 2>&1
+  codex exec --skip-git-repo-check ${search_flag[@]+"${search_flag[@]}"} "$full_prompt" 2>&1
 fi
 echo "=== end ==="
