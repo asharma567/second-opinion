@@ -38,6 +38,7 @@ max_iterations=0    # 0 = unbounded (rely on convergence)
 no_synthesis=0
 temperature=""
 chain=""
+deep_research=0
 task=""
 
 usage() {
@@ -52,6 +53,11 @@ Options:
   --iterations N       bound max rounds (default 0 = until convergence)
   --no-synthesis       skip Phase 5 (equivalent to --mode debate)
   --temperature low|high   adapter hint (best-effort)
+  --deep-research      every provider does its own live web research before
+                       answering (xAI Live Search / OpenRouter :online /
+                       Google Search grounding / codex --search). Yields a
+                       data-rich, evidence-backed debate. Slower (~2-4x) and
+                       adds minor web/token cost.
   --chain <targets>    write handoff.json suggesting next command (comma-separated)
   -h, --help           this help
 
@@ -72,6 +78,7 @@ while [[ $# -gt 0 ]]; do
     --iterations) max_iterations="$2"; shift 2 ;;
     --no-synthesis) no_synthesis=1; shift ;;
     --temperature) temperature="$2"; shift 2 ;;
+    --deep-research) deep_research=1; shift ;;
     --chain) chain="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     --) shift; while [[ $# -gt 0 ]]; do prompt_parts+=("$1"); shift; done ;;
@@ -149,7 +156,12 @@ role_synthesizer="$(pick_role synthesizer)"
 echo "[reason] run dir: $run_dir" >&2
 echo "[reason] providers available: ${providers[*]}" >&2
 echo "[reason] roles: A=$role_author_a, critic=$role_critic, B=$role_author_b, synth=$role_synthesizer" >&2
-echo "[reason] mode=$mode domain=$domain judges=$judges_n convergence=$convergence_n max_iter=$max_iterations" >&2
+echo "[reason] mode=$mode domain=$domain judges=$judges_n convergence=$convergence_n max_iter=$max_iterations deep_research=$deep_research" >&2
+
+# When deep-research is on, every adapter call (all roles + all judges) inherits
+# this env var and performs its own live web search before answering. The
+# adapters already read SECOND_OPINION_DEEP_RESEARCH; reason.sh just flips it on.
+export SECOND_OPINION_DEEP_RESEARCH="$deep_research"
 
 # Manifest
 providers_json="$(printf '%s\n' "${providers[@]}" | jq -Rs 'split("\n") | map(select(. != ""))')"
