@@ -55,7 +55,10 @@ if [[ -z "$response" ]]; then
   exit 5
 fi
 
-content="$(echo "$response" | jq -r '.choices[0].message.content // .error.message // "no content"')"
+# xAI error responses put a plain STRING in `.error` (not OpenAI's `.error.message`
+# object). Handle both shapes so a server error surfaces as readable text instead
+# of crashing jq (which, under `set -e`, would abort the whole reason loop).
+content="$(echo "$response" | jq -r '.choices[0].message.content // (if (.error|type)=="object" then .error.message else .error end) // "no content"')"
 echo "$content"
 
 if [[ "$deep" == "1" ]]; then
