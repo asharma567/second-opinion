@@ -24,13 +24,15 @@ if [[ -n "$system_preamble" ]]; then
   full_prompt="$system_preamble"$'\n\n'"$prompt"
 fi
 
-# Deep-research mode: enable codex's native live web search (Responses web_search
-# tool, exposed via `codex exec --search`) so codex grounds its answer in real
-# sources like the other providers, instead of just being nudged via text.
+# Deep-research mode: try codex's config-based web search. codex 0.129.0 dropped
+# the old `exec --search` flag (web search is now config-driven via
+# `-c tools.web_search=true`). If the running CLI rejects/ignores the flag, degrade
+# to a plain call rather than failing the whole reason loop — author_a failing
+# aborts the entire round, so a broken flag must never be fatal.
 search_flag=()
 if [[ "$deep" == "1" ]]; then
-  search_flag=(--search)
-  full_prompt="[deep-research mode: use live web search; ground claims in sources and cite them]"$'\n\n'"$full_prompt"
+  search_flag=(-c tools.web_search=true)
+  full_prompt="[deep-research mode: ground claims in real polls/studies/data; cite sources you are confident about, and do not fabricate citations]"$'\n\n'"$full_prompt"
 fi
 
 # Use --output-last-message to extract just the final assistant message, avoiding
@@ -39,12 +41,32 @@ fi
 msg_file="$(mktemp -t second-opinion-codex.XXXXXX)"
 trap 'rm -f "$msg_file"' EXIT
 
+run_codex() {
+  # $1=1 → include web-search flag; $1=0 → plain. Writes final msg to $msg_file.
+  if [[ "$1" == "1" && ${#search_flag[@]} -gt 0 ]]; then
+    codex exec --skip-git-repo-check "${search_flag[@]}" --output-last-message "$msg_file" "$full_prompt" >/dev/null 2>&1
+  else
+    codex exec --skip-git-repo-check --output-last-message "$msg_file" "$full_prompt" >/dev/null 2>&1
+  fi
+}
+
 echo "=== provider: codex (deep=$deep) ==="
-if codex exec --skip-git-repo-check ${search_flag[@]+"${search_flag[@]}"} --output-last-message "$msg_file" "$full_prompt" >/dev/null 2>&1; then
+ok=0
+if [[ "$deep" == "1" ]]; then
+  if run_codex 1 && [[ -s "$msg_file" ]]; then
+    ok=1
+  else
+    echo "[codex] web-search flag rejected or empty output; retrying without web search" >&2
+  fi
+fi
+if [[ "$ok" == "0" ]] && run_codex 0 && [[ -s "$msg_file" ]]; then
+  ok=1
+fi
+if [[ "$ok" == "1" ]]; then
   cat "$msg_file"
 else
-  # Fall back to noisy stdout if --output-last-message produced nothing useful
+  # Last resort: noisy stdout (plain, no flags) so we still surface something.
   echo "[codex] --output-last-message empty; falling back to stdout (may include banner)" >&2
-  codex exec --skip-git-repo-check ${search_flag[@]+"${search_flag[@]}"} "$full_prompt" 2>&1
+  codex exec --skip-git-repo-check "$full_prompt" 2>&1
 fi
 echo "=== end ==="
