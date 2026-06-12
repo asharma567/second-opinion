@@ -25,7 +25,7 @@ The router script (`scripts/classify.sh`) picks a provider by keywords. Override
 
 | Task shape | Provider | Why |
 |---|---|---|
-| Frontend / UI / design critique | `gemini` → auto-falls-through to OpenRouter (`google/gemini-2.5-pro`) on error/missing key | Strong visual + UX reasoning |
+| Frontend / UI / design critique | `gemini` → routes to OpenRouter (`google/gemini-2.5-flash` default until PER-18; set `OPENROUTER_MODEL=google/gemini-2.5-pro` for top tier) | Strong visual + UX reasoning |
 | Humor / romance / vibe-check / casual | `grok` | Looser, more conversational |
 | Tool-calling code / agent-orchestration design | `codex` (or **spawn subagent** for Claude-specific) | Codex is strong at structured engineering reasoning; for a true Claude opinion, spawn a subagent — see Note on Claude |
 | Engineering design review / architecture | `codex` | OpenAI's o-series via `codex` CLI (rides on ChatGPT sub) |
@@ -85,14 +85,39 @@ Run `scripts/auth-check.sh` to verify each provider is reachable.
 but with cross-provider judges instead of all-Claude subagents.
 
 ```bash
-# default: 3 judges, convergence=3, mode=convergent, domain=software
+# default: 3 judges, convergence=3, max 3 rounds, mode=convergent, domain=software
 ~/.claude/skills/second-opinion/scripts/reason.sh "should we use event sourcing for orders"
 
 # bounded debate (no synthesis), 5 judges
 ~/.claude/skills/second-opinion/scripts/reason.sh \
   --mode debate --judges 5 --iterations 4 \
   --domain product "monetize free tier vs paid-only launch"
+
+# evidence-backed debate: authors + synthesizer do live web research
+# (critic and judges never trigger paid live-search)
+~/.claude/skills/second-opinion/scripts/reason.sh \
+  --deep-research "should we adopt HTTP/3 for our public API endpoints?"
 ```
+
+Cost controls (defaults tuned for ~60-70% lower paid-API spend per run):
+
+- `--iterations` defaults to **3** (0 = unbounded). Historical runs never converged
+  and rounds 4-5 added no signal; the oscillation guard also trips at 3 rounds.
+- Judges run on a cheap tier: `grok-4-fast` and `google/gemini-2.5-flash` (via
+  OpenRouter). Authors and the synthesizer keep their top-tier models. Override
+  with `SECOND_OPINION_JUDGE_GROK_MODEL` / `SECOND_OPINION_JUDGE_OPENROUTER_MODEL`.
+- `--deep-research` is scoped to Author-A / Author-B / Synthesizer calls only;
+  critic and judge calls never pay for live search.
+- Output budgets: API adapters cap completions at 3000 tokens
+  (`SECOND_OPINION_MAX_TOKENS` to override); author prompts carry an
+  "at most 800 words" budget; fan-out prompts carry "at most 400 words" and each
+  fan-out response is truncated to 8000 bytes before synthesis.
+- Degenerate-candidate guard: a candidate under 50 words is retried once on a
+  different provider; if still degenerate the round skips synthesis + judging
+  and carries the incumbent (no judge spend on garbage).
+- `SECOND_OPINION_SKIP_PROVIDERS` — comma-separated providers to exclude from a
+  run (e.g. `SECOND_OPINION_SKIP_PROVIDERS=gemini,grok`). Replaces the old
+  `reason-nogem.sh` fork, which has been deleted.
 
 Role mapping (defaults; degrades when fewer providers configured):
 

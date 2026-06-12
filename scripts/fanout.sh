@@ -35,9 +35,13 @@ fi
 
 echo "[fanout] calling: ${providers[*]}" >&2
 
+# Budget instruction: fan-out responses get synthesized by the lead session, so
+# N providers x long answers = N x token burn. Keep each response tight.
+budgeted_prompt="$prompt"$'\n\n'"[Response budget: at most 400 words. Be dense and concrete — no filler, no restating the question.]"
+
 pids=()
 for p in "${providers[@]}"; do
-  ( "$ADAPTERS/${p}.sh" "$prompt" >"$tmpdir/$p.out" 2>"$tmpdir/$p.err"; echo $? >"$tmpdir/$p.rc" ) &
+  ( "$ADAPTERS/${p}.sh" "$budgeted_prompt" >"$tmpdir/$p.out" 2>"$tmpdir/$p.err"; echo $? >"$tmpdir/$p.rc" ) &
   pids+=($!)
 done
 
@@ -51,7 +55,17 @@ combined="$tmpdir/combined.txt"
 for p in "${providers[@]}"; do
   rc="$(cat "$tmpdir/$p.rc" 2>/dev/null || echo 99)"
   if [[ "$rc" == "0" ]]; then
-    cat "$tmpdir/$p.out" >> "$combined"
+    # Cap what flows back into the lead session's context: 8000 bytes per
+    # provider is plenty for a 400-word budgeted answer + envelope/citations.
+    out_bytes="$(wc -c < "$tmpdir/$p.out" | tr -d ' ')"
+    head -c 8000 "$tmpdir/$p.out" >> "$combined"
+    if [[ "$out_bytes" -gt 8000 ]]; then
+      {
+        echo
+        echo "[fanout] $p output truncated ($out_bytes -> 8000 bytes)"
+        echo "=== end ==="
+      } >> "$combined"
+    fi
     echo >> "$combined"
   else
     {

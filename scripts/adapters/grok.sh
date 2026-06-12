@@ -30,17 +30,23 @@ if [[ "$deep" == "1" ]]; then
   search_params='{"mode":"on","return_citations":true}'
 fi
 
+# Output budget: second-opinion responses don't need more than ~3000 tokens
+# (~2000 words). Caps paid output spend. Override via SECOND_OPINION_MAX_TOKENS.
+max_tokens="${SECOND_OPINION_MAX_TOKENS:-3000}"
+
 payload="$(jq -n \
   --arg model "$model" \
   --arg sys "$system_preamble" \
   --arg user "$prompt" \
   --argjson search "$search_params" \
+  --argjson max_tokens "$max_tokens" \
   '{
     model: $model,
     messages: [
       {role:"system", content:$sys},
       {role:"user", content:$user}
     ],
+    max_tokens: $max_tokens,
     search_parameters: $search
   } | if .search_parameters == null then del(.search_parameters) else . end')"
 
