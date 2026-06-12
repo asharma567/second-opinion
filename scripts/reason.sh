@@ -34,7 +34,7 @@ mode="convergent"   # convergent | creative | debate
 domain="software"
 judges_n=3
 convergence_n=3
-max_iterations=0    # 0 = unbounded (rely on convergence)
+max_iterations=3    # bounded by default — 0/22 historical runs ever converged; rounds 4-5 added no signal. Set 0 for unbounded.
 no_synthesis=0
 temperature=""
 chain=""
@@ -50,14 +50,15 @@ Options:
   --domain <d>         software (default) | product | business | security | research | content
   --judges N           judge panel size (3 default; 5 or 7 for thorough)
   --convergence N      consecutive wins to declare convergence (default 3)
-  --iterations N       bound max rounds (default 0 = until convergence)
+  --iterations N       bound max rounds (default 3; 0 = until convergence)
   --no-synthesis       skip Phase 5 (equivalent to --mode debate)
   --temperature low|high   adapter hint (best-effort)
-  --deep-research      every provider does its own live web research before
-                       answering (xAI Live Search / OpenRouter :online /
-                       Google Search grounding / codex --search). Yields a
-                       data-rich, evidence-backed debate. Slower (~2-4x) and
-                       adds minor web/token cost.
+  --deep-research      Author-A, Author-B, and the Synthesizer do their own
+                       live web research before answering (xAI Live Search /
+                       OpenRouter :online / Google Search grounding /
+                       codex web search). Critic and judges never do paid
+                       live-search — they evaluate the evidence-backed text.
+                       Slower (~2-4x) and adds minor web/token cost.
   --chain <targets>    write handoff.json suggesting next command (comma-separated)
   -h, --help           this help
 
@@ -96,11 +97,21 @@ fi
 if [[ "$mode" == "debate" ]]; then no_synthesis=1; fi
 
 # ---------- discover available providers ----------
+# SECOND_OPINION_SKIP_PROVIDERS: comma-separated providers to exclude from the
+# run (e.g. "gemini" or "gemini,grok"). Replaces the old reason-nogem.sh fork.
+skip_providers=",$(printf '%s' "${SECOND_OPINION_SKIP_PROVIDERS:-}" | tr -d '[:space:]'),"
+not_skipped() {
+  case "$skip_providers" in
+    *",$1,"*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 providers=()
-command -v codex >/dev/null 2>&1 && providers+=(codex)
-[[ -n "${XAI_API_KEY:-}" ]]        && providers+=(grok)
-[[ -n "${GEMINI_API_KEY:-}" ]]     && providers+=(gemini)
-[[ -n "${OPENROUTER_API_KEY:-}" ]] && providers+=(openrouter)
+not_skipped codex      && command -v codex >/dev/null 2>&1 && providers+=(codex)
+not_skipped grok       && [[ -n "${XAI_API_KEY:-}" ]]        && providers+=(grok)
+not_skipped gemini     && [[ -n "${GEMINI_API_KEY:-}" ]]     && providers+=(gemini)
+not_skipped openrouter && [[ -n "${OPENROUTER_API_KEY:-}" ]] && providers+=(openrouter)
 
 if [[ ${#providers[@]} -lt 2 ]]; then
   echo "error: reason loop needs ≥2 providers (have: ${providers[*]:-none})" >&2
@@ -158,10 +169,11 @@ echo "[reason] providers available: ${providers[*]}" >&2
 echo "[reason] roles: A=$role_author_a, critic=$role_critic, B=$role_author_b, synth=$role_synthesizer" >&2
 echo "[reason] mode=$mode domain=$domain judges=$judges_n convergence=$convergence_n max_iter=$max_iterations deep_research=$deep_research" >&2
 
-# When deep-research is on, every adapter call (all roles + all judges) inherits
-# this env var and performs its own live web search before answering. The
-# adapters already read SECOND_OPINION_DEEP_RESEARCH; reason.sh just flips it on.
-export SECOND_OPINION_DEEP_RESEARCH="$deep_research"
+# Deep-research scoping: the env var is intentionally NOT exported globally.
+# Only the Author-A / Author-B / Synthesizer calls get
+# SECOND_OPINION_DEEP_RESEARCH="$deep_research" prefixed per-invocation, so the
+# critic and the judge panel never trigger paid live-search (xAI Live Search /
+# OpenRouter :online). Judges evaluate text that is already evidence-backed.
 
 # Manifest
 providers_json="$(printf '%s\n' "${providers[@]}" | jq -Rs 'split("\n") | map(select(. != ""))')"
@@ -257,7 +269,7 @@ CONSTRAINTS:
 - Every claim must be supported by reasoning or evidence
 - If this is a design/architecture task: specify components, interfaces, and tradeoffs explicitly
 - If this is an argument/decision task: state your position clearly, then defend it
-- Length: appropriate for depth of task — not artificially long or short
+- Length budget: at most 800 words — be dense and concrete, not padded
 EOF
   else
     local incumbent_file="$3"
@@ -272,6 +284,8 @@ $(cat "$incumbent_file")
 ---
 
 Your role: Improve this candidate. Identify its weaknesses and produce a version that addresses them. You may restructure, extend, prune, or reframe. Do NOT simply paraphrase. Produce a genuinely better version.
+
+Length budget: at most 800 words — be dense and concrete, not padded.
 EOF
   fi
 }
@@ -329,6 +343,7 @@ CONSTRAINTS:
 - Do NOT reproduce A verbatim — your candidate must be substantively different
 - Every claim must be supported by reasoning or evidence
 - Avoid over-correcting: if a MINOR weakness was stylistic, don't restructure the entire response for it
+- Length budget: at most 800 words — be dense and concrete, not padded
 EOF
 }
 
@@ -481,6 +496,7 @@ round=0
 consecutive_wins=0
 last_winners=()
 converged_reason=""
+degenerate_streak=0
 
 # Initialize lineage
 : > "$run_dir/reason-lineage.jsonl"
@@ -490,6 +506,12 @@ judge_providers=()
 while IFS= read -r jp; do
   judge_providers+=("$jp")
 done < <(select_judges "$judges_n")
+
+# Judge model tier: judging (pick X/Y/Z + short rationale) doesn't need top-tier
+# models — route judge calls to cheap fast models. Author/Synthesizer keep their
+# top tiers. Override per-role via the SECOND_OPINION_JUDGE_* env vars.
+judge_grok_model="${SECOND_OPINION_JUDGE_GROK_MODEL:-grok-4-fast}"
+judge_openrouter_model="${SECOND_OPINION_JUDGE_OPENROUTER_MODEL:-google/gemini-2.5-flash}"
 
 while : ; do
   round=$((round + 1))
@@ -507,7 +529,8 @@ while : ; do
   else
     write_author_a_prompt "$round" "$round_dir/prompt-A.txt" "$incumbent_file"
   fi
-  if ! call_adapter "$role_author_a" "$round_dir/prompt-A.txt" "$round_dir/candidate-A.txt"; then
+  if ! SECOND_OPINION_DEEP_RESEARCH="$deep_research" \
+       call_adapter "$role_author_a" "$round_dir/prompt-A.txt" "$round_dir/candidate-A.txt"; then
     echo "[reason] author_a failed — see $round_dir/candidate-A.txt.err" >&2
     cat "$round_dir/candidate-A.txt.err" >&2
     exit 5
@@ -522,26 +545,106 @@ while : ; do
     cat "$round_dir/critique.txt.err" >&2
     exit 5
   fi
-  critic_weaknesses=$(grep -cE '^WEAKNESS-' "$round_dir/critique.txt" 2>/dev/null || echo 0)
+  # Note: grep -c prints "0" AND exits 1 on zero matches — `|| echo 0` would
+  # yield a two-line "0\n0" that breaks jq --argjson downstream. Use || true.
+  critic_weaknesses=$(grep -cE '^WEAKNESS-' "$round_dir/critique.txt" 2>/dev/null || true)
   critic_weaknesses=${critic_weaknesses:-0}
   echo "  → $critic_weaknesses weaknesses raised" >&2
 
   # Phase 4: Generate-B
   echo "[round $round] Phase 4: Generate-B ($role_author_b)" >&2
   write_author_b_prompt "$round_dir/candidate-A.txt" "$round_dir/critique.txt" "$round_dir/prompt-B.txt"
-  if ! call_adapter "$role_author_b" "$round_dir/prompt-B.txt" "$round_dir/candidate-B.txt"; then
+  if ! SECOND_OPINION_DEEP_RESEARCH="$deep_research" \
+       call_adapter "$role_author_b" "$round_dir/prompt-B.txt" "$round_dir/candidate-B.txt"; then
     echo "[reason] author_b failed — see $round_dir/candidate-B.txt.err" >&2
     cat "$round_dir/candidate-B.txt.err" >&2
     exit 5
   fi
   echo "  → $(word_count "$round_dir/candidate-B.txt") words" >&2
 
+  # Degenerate-candidate guard: a candidate under 50 words (provider error text,
+  # refusal stub, truncation) would poison synthesis and waste paid judge calls.
+  # Retry the role once on a different provider; if still degenerate, skip
+  # synthesis+judging for this round and carry the incumbent.
+  degenerate_round=0
+  for cand in A B; do
+    cfile="$round_dir/candidate-$cand.txt"
+    [[ "$(word_count "$cfile")" -ge 50 ]] && continue
+    case "$cand" in
+      A) orig_provider="$role_author_a" ;;
+      B) orig_provider="$role_author_b" ;;
+    esac
+    retry_provider=""
+    for p in "${providers[@]}"; do
+      if [[ "$p" != "$orig_provider" ]]; then retry_provider="$p"; break; fi
+    done
+    if [[ -n "$retry_provider" ]]; then
+      echo "  [warn] candidate-$cand degenerate (<50 words from $orig_provider) — retrying once with $retry_provider" >&2
+      SECOND_OPINION_DEEP_RESEARCH="$deep_research" \
+        call_adapter "$retry_provider" "$round_dir/prompt-$cand.txt" "$cfile" || true
+      echo "  → retry ($retry_provider): $(word_count "$cfile") words" >&2
+    fi
+    if [[ "$(word_count "$cfile")" -lt 50 ]]; then
+      degenerate_round=1
+    fi
+  done
+
+  if [[ "$degenerate_round" == "1" ]]; then
+    degenerate_streak=$((degenerate_streak + 1))
+    echo "  [warn] degenerate candidate persists after retry — skipping synthesis+judging this round; carrying incumbent" >&2
+    if [[ -z "$incumbent" ]]; then
+      # No incumbent yet (round 1): keep the longer candidate so the run can
+      # still produce an output even if later rounds also degenerate.
+      if [[ "$(word_count "$round_dir/candidate-A.txt")" -ge "$(word_count "$round_dir/candidate-B.txt")" ]]; then
+        incumbent="A"
+      else
+        incumbent="B"
+      fi
+      cp "$(get_file_for_candidate "$incumbent")" "$run_dir/current-incumbent.txt"
+      incumbent_file="$run_dir/current-incumbent.txt"
+    fi
+    words_a="$(word_count "$round_dir/candidate-A.txt")"
+    words_b="$(word_count "$round_dir/candidate-B.txt")"
+    jq -n \
+      --argjson round "$round" \
+      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --argjson words_a "$words_a" \
+      --argjson words_b "$words_b" \
+      --arg round_winner "carried-$incumbent" \
+      --arg incumbent "$incumbent" \
+      --argjson consec "$consecutive_wins" \
+      --argjson critic_weaknesses "$critic_weaknesses" \
+      '{
+        round: $round, timestamp: $ts, degenerate_round: true,
+        candidate_A_words: $words_a, candidate_B_words: $words_b, candidate_AB_words: 0,
+        label_map: {X: "", Y: "", Z: ""},
+        vote_tally: {A: 0, B: 0, AB: 0},
+        round_winner: $round_winner, incumbent_after: $incumbent,
+        consecutive_wins: $consec, critic_weaknesses: $critic_weaknesses
+      }' >> "$run_dir/reason-lineage.jsonl"
+    printf "%d\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%d\n" \
+      "$round" "carried-$incumbent" 0 0 0 \
+      "$words_a" "$words_b" 0 "$incumbent" "$consecutive_wins" \
+      >> "$run_dir/reason-results.tsv"
+    if [[ "$max_iterations" -gt 0 && "$round" -ge "$max_iterations" ]]; then
+      converged_reason="bounded stop (max_iterations=$max_iterations reached)"
+      break
+    fi
+    if [[ "$degenerate_streak" -ge 2 ]]; then
+      converged_reason="aborted — $degenerate_streak consecutive degenerate rounds (providers returning <50 words)"
+      break
+    fi
+    continue
+  fi
+  degenerate_streak=0
+
   # Phase 5: Synthesize (skip in debate mode)
   ab_exists=0
   if [[ "$no_synthesis" == "0" ]]; then
     echo "[round $round] Phase 5: Synthesize-AB ($role_synthesizer)" >&2
     write_synthesizer_prompt "$round_dir/candidate-A.txt" "$round_dir/candidate-B.txt" "$round_dir/prompt-AB.txt"
-    if call_adapter "$role_synthesizer" "$round_dir/prompt-AB.txt" "$round_dir/candidate-AB.txt"; then
+    if SECOND_OPINION_DEEP_RESEARCH="$deep_research" \
+       call_adapter "$role_synthesizer" "$round_dir/prompt-AB.txt" "$round_dir/candidate-AB.txt"; then
       if [[ -s "$round_dir/candidate-AB.txt" ]]; then
         ab_exists=1
         echo "  → $(word_count "$round_dir/candidate-AB.txt") words" >&2
@@ -613,7 +716,10 @@ while : ; do
     judge_idx=$((judge_idx + 1))
     judge_out="$round_dir/judge-${judge_idx}-${jp}.txt"
     echo "  [judge $judge_idx/${#judge_providers[@]}: $jp] ..." >&2
-    if call_adapter "$jp" "$round_dir/prompt-judge.txt" "$judge_out"; then
+    # Role-scoped cheap-tier overrides: apply only to this judge call (the
+    # gemini adapter routes through OpenRouter, so OPENROUTER_MODEL covers it).
+    if GROK_MODEL="$judge_grok_model" OPENROUTER_MODEL="$judge_openrouter_model" \
+       call_adapter "$jp" "$round_dir/prompt-judge.txt" "$judge_out"; then
       vote_label="$(extract_judge_vote "$judge_out")"
       if [[ -n "$vote_label" ]]; then
         winner_cand="$(get_candidate_for_label "$vote_label")"
@@ -775,11 +881,12 @@ while : ; do
     converged_reason="bounded stop (max_iterations=$max_iterations reached)"
     break
   fi
-  # Oscillation guard
-  if [[ ${#last_winners[@]} -ge 5 ]]; then
-    distinct=$(printf '%s\n' "${last_winners[@]: -5}" | sort -u | wc -l | tr -d ' ')
+  # Oscillation guard — trips at 3 rounds (was 5: historical evidence showed
+  # rounds 4-5 never added signal, only paid-API spend)
+  if [[ ${#last_winners[@]} -ge 3 ]]; then
+    distinct=$(printf '%s\n' "${last_winners[@]: -3}" | sort -u | wc -l | tr -d ' ')
     if [[ "$distinct" -ge 3 && "$consecutive_wins" -lt 2 ]]; then
-      converged_reason="oscillation detected — last 5 winners had $distinct distinct candidates"
+      converged_reason="oscillation detected — last 3 winners had $distinct distinct candidates"
       break
     fi
   fi

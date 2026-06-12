@@ -8,11 +8,14 @@ deep="${SECOND_OPINION_DEEP_RESEARCH:-0}"
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ADAPTERS="$SKILL_DIR/scripts/adapters"
 
+# Fall-through default is gemini-2.5-flash (~90% cheaper than pro, ample for
+# second-opinion work) until the Google Cloud billing dispute (PER-18) resolves.
+# Set OPENROUTER_MODEL=google/gemini-2.5-pro to get pro back.
 fall_through_to_openrouter() {
   local reason="$1"
   if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
-    echo "[gemini] $reason — falling through to OpenRouter (model=${OPENROUTER_MODEL:-google/gemini-2.5-pro})" >&2
-    OPENROUTER_MODEL="${OPENROUTER_MODEL:-google/gemini-2.5-pro}" \
+    echo "[gemini] $reason — falling through to OpenRouter (model=${OPENROUTER_MODEL:-google/gemini-2.5-flash})" >&2
+    OPENROUTER_MODEL="${OPENROUTER_MODEL:-google/gemini-2.5-flash}" \
       exec "$ADAPTERS/openrouter.sh" "$prompt"
   fi
   echo "error: $reason and OPENROUTER_API_KEY not set for fallback" >&2
@@ -22,13 +25,14 @@ fall_through_to_openrouter() {
 # Gemini direct API is disabled by default: the Google Cloud billing account tied
 # to GEMINI_API_KEY is suspended ("prepayment credits depleted"), so the direct
 # call fails on every invocation and only wastes a round-trip before falling
-# through. Route the gemini role straight to OpenRouter's google/gemini-2.5-pro.
+# through. Route the gemini role straight to OpenRouter's google/gemini-2.5-flash
+# (override with OPENROUTER_MODEL=google/gemini-2.5-pro for the top tier).
 # Set SECOND_OPINION_GEMINI_DIRECT=1 to re-enable the direct call once the
 # Google Cloud billing dispute is resolved (see PER-18).
 if [[ "${SECOND_OPINION_GEMINI_DIRECT:-0}" != "1" ]]; then
   if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
-    echo "[gemini] direct API disabled (billing suspended) — routing to OpenRouter (model=${OPENROUTER_MODEL:-google/gemini-2.5-pro})" >&2
-    OPENROUTER_MODEL="${OPENROUTER_MODEL:-google/gemini-2.5-pro}" \
+    echo "[gemini] direct API disabled (billing suspended) — routing to OpenRouter (model=${OPENROUTER_MODEL:-google/gemini-2.5-flash})" >&2
+    OPENROUTER_MODEL="${OPENROUTER_MODEL:-google/gemini-2.5-flash}" \
       exec "$ADAPTERS/openrouter.sh" "$prompt"
   fi
   echo "error: gemini direct API disabled and OPENROUTER_API_KEY not set for routing" >&2
@@ -59,13 +63,21 @@ if [[ "$deep" == "1" ]]; then
   tools_json='[{"google_search":{}}]'
 fi
 
+# Output budget: second-opinion responses don't need more than ~3000 tokens
+# (~2000 words). Caps paid output spend. Override via SECOND_OPINION_MAX_TOKENS.
+# Note: Gemini 2.5 counts thinking tokens against maxOutputTokens, so this also
+# bounds hidden reasoning spend.
+max_tokens="${SECOND_OPINION_MAX_TOKENS:-3000}"
+
 payload="$(jq -n \
   --arg sys "$system_preamble" \
   --arg user "$prompt" \
   --argjson tools "$tools_json" \
+  --argjson max_tokens "$max_tokens" \
   '{
     systemInstruction: { parts: [ { text: $sys } ] },
     contents: [ { role:"user", parts: [ { text: $user } ] } ],
+    generationConfig: { maxOutputTokens: $max_tokens },
     tools: $tools
   } | if .tools == null then del(.tools) else . end')"
 
