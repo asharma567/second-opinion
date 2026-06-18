@@ -22,7 +22,8 @@ usage() {
 Usage: dispatch.sh [options] <prompt>
 
 Options:
-  --provider <name>      codex | grok | gemini | openrouter   (skip auto-routing)
+  --provider <name>      codex | grok | gemini | openrouter | fusion  (skip auto-routing)
+                         (fusion = OpenRouter research panel; research-only, billed)
                          (Claude not listed: spawn a subagent from the lead instead)
   --mode <m>             explore | critique | verify       (passed to adapter)
   --input-file <path>    attach file content to prompt

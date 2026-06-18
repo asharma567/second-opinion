@@ -30,7 +30,8 @@ The router script (`scripts/classify.sh`) picks a provider by keywords. Override
 | Tool-calling code / agent-orchestration design | `codex` (or **spawn subagent** for Claude-specific) | Codex is strong at structured engineering reasoning; for a true Claude opinion, spawn a subagent — see Note on Claude |
 | Engineering design review / architecture | `codex` | OpenAI's o-series via `codex` CLI (rides on ChatGPT sub) |
 | Refusal fallback / sensitive prompts that hit ethics gates | `openrouter` | Routes to a low-refusal model (default `mistralai/mistral-large-2411`); override via `OPENROUTER_MODEL` |
-| Deep research / multi-source synthesis | fan-out + lead-session synthesis | Lead Claude session synthesizes the raw fan-out output |
+| Deep research / multi-source synthesis (`--deep-research` + research-shaped prompt) | `fusion` (OpenRouter panel+judge) | One call fans across frontier models + live web research, judge synthesizes. Opt-in only (separately billed); else falls through to fan-out |
+| Deep research without `--deep-research` | fan-out + lead-session synthesis | Lead Claude session synthesizes the raw fan-out output |
 | (default, no signal) | `codex` | Safest general-purpose, subscription-routed |
 
 ## How to invoke
@@ -63,6 +64,7 @@ Required env vars / auth (only the providers you actually use):
 - `GEMINI_API_KEY` — Gemini (API today; the `gemini` CLI is installed but auth not yet sub-routed — see Note on Gemini below)
 - `OPENROUTER_API_KEY` — OpenRouter (refusal fallback / model marketplace; separately billed at OpenRouter rates)
 - `OPENROUTER_MODEL` — optional model override for OpenRouter (default `mistralai/mistral-large-2411`; append `:online` for web-augmented)
+- `OPENROUTER_FUSION_MODEL` — optional slug override for the `fusion` adapter (default `openrouter/fusion`). Fusion reuses `OPENROUTER_API_KEY`; it is a panel+judge research model, separately billed at OpenRouter rates (several model calls per query) — opt-in via `--deep-research` or `--provider fusion`.
 
 ## Note on Claude — spawn a subagent, don't call the API
 
@@ -153,7 +155,8 @@ second-opinion/
         ├── codex.sh                # OpenAI / Codex CLI (rides on ChatGPT sub)
         ├── grok.sh                 # xAI API (no CLI/sub available as of May 2026)
         ├── gemini.sh               # Google Gemini API (CLI sub-routing TODO — see Note on Gemini)
-        └── openrouter.sh           # OpenRouter (refusal fallback / model marketplace)
+        ├── openrouter.sh           # OpenRouter (refusal fallback / model marketplace)
+        └── fusion.sh               # OpenRouter Fusion (panel+judge research; opt-in, billed)
 ```
 
 ## Output convention
