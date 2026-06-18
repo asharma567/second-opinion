@@ -6,6 +6,18 @@ lc="$(echo "$prompt" | tr '[:upper:]' '[:lower:]')"
 
 match() { [[ "$lc" == *"$1"* ]]; }
 
+# Deep research → OpenRouter Fusion (panel+judge meta-model). Opt-in only:
+# requires --deep-research (SECOND_OPINION_DEEP_RESEARCH=1) AND a research-shaped
+# prompt. Fusion is separately billed and runs several model calls per query, so it
+# never auto-selects on prompt text alone. Reach it otherwise via --provider fusion.
+if [[ "${SECOND_OPINION_DEEP_RESEARCH:-0}" == "1" ]]; then
+  if match "research" || match "latest on" || match "state of the art" \
+     || match "literature" || match "survey" || match "what's new" \
+     || match "sources" || match "evidence" || match "studies"; then
+    echo fusion; exit 0
+  fi
+fi
+
 # Frontend / UI / design
 if match "frontend" || match "ui design" || match "ux " || match "css" || match "tailwind" \
    || match "react component" || match "figma" || match "visual" || match "color palette"; then

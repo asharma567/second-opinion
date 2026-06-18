@@ -44,7 +44,7 @@ else
   resp="$(curl -sS -o /dev/null -w '%{http_code}' \
     https://openrouter.ai/api/v1/auth/key \
     -H "Authorization: Bearer $OPENROUTER_API_KEY" || echo 000)"
-  if [[ "$resp" == "200" ]]; then ok "OPENROUTER_API_KEY reachable (HTTP $resp)"
+  if [[ "$resp" == "200" ]]; then ok "OPENROUTER_API_KEY reachable (HTTP $resp) — also powers fusion adapter"
   else fail "OPENROUTER_API_KEY HTTP $resp"
   fi
 fi
