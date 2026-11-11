@@ -17,12 +17,12 @@ fi
 # Default to a strong model with permissive content policy.
 # Override via OPENROUTER_MODEL env var. See https://openrouter.ai/models for choices.
 # Common picks:
-#   mistralai/mistral-large-2411            — strong, low refusal
+#   mistralai/mistral-large-4-0            — strong, low refusal
 #   meta-llama/llama-3.3-70b-instruct       — open weights, low refusal
 #   nousresearch/hermes-3-llama-3.1-405b    — uncensored variant
 #   anthropic/claude-3.7-sonnet             — Claude (still subject to AUP)
 #   openai/gpt-4o                           — GPT-4o (still subject to AUP)
-model="${OPENROUTER_MODEL:-mistralai/mistral-large-2411}"
+model="${OPENROUTER_MODEL:-mistralai/mistral-large-4-0}"
 
 system_preamble="You are a peer LLM called via OpenRouter for a second opinion. Be direct and useful. The user is a senior engineer; don't over-hedge or moralize."
 case "$mode" in
