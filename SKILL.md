@@ -81,6 +81,36 @@ Keys auto-load from `~/.openclaw-tgpkb/secrets/<provider>_api_key` if env vars a
 
 Run `scripts/auth-check.sh` to verify each provider is reachable.
 
+Codex model: `adapters/codex.sh` pins its own model instead of inheriting
+`~/.codex/config.toml` (the desktop app's model can be one the CLI's ChatGPT
+entitlement rejects with `model_not_found`). Override with
+`SECOND_OPINION_CODEX_MODEL=<slug>` (default `gpt-6-astra`; `inherit` = use
+config.toml) and `SECOND_OPINION_CODEX_FALLBACK_MODEL` (default `gpt-5.6-sol`,
+tried once on `model_not_found`; empty disables). If codex returns no answer the
+adapter exits 6 with the error, never passes the CLI banner through as an answer.
+
+## Invoking from Codex CLI
+
+Codex loads this same directory as a skill via the symlink
+`~/.codex/skills/second-opinion -> <repo>` (created by `scripts/install.sh`).
+There are no slash commands in Codex, so call the scripts directly:
+
+```bash
+# single-shot / fan-out
+~/.codex/skills/second-opinion/scripts/dispatch.sh --provider grok "critique this plan: ..."
+# adversarial refinement loop (the :reason subcommand)
+~/.codex/skills/second-opinion/scripts/reason.sh --iterations 2 --judges 3 "<task>"
+```
+
+When the user asks Codex for "second-opinion reason", "adversarial refinement",
+or a cross-provider judged debate, run `reason.sh`, then read `overview.md` from
+the run dir it prints and summarize the winning candidate, lineage, vote tallies,
+and any abstaining/failed judges. Do not auto-run a `handoff.json` chain.
+The scripts make network calls (OpenRouter, xAI, and a nested `codex exec`), so
+they need a sandbox mode with network access. Inside Codex, the codex role is
+the same model family as the caller; add `SECOND_OPINION_SKIP_PROVIDERS=codex`
+for an outside-only panel (needs at least 2 other providers).
+
 ## :reason — adversarial refinement subcommand
 
 `/second-opinion:reason` runs a cold-start multi-agent loop modeled on `/autoresearch:reason`,

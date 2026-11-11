@@ -71,6 +71,32 @@ else
 fi
 echo
 
+# 2b. Codex CLI skill symlink — same files, so Codex gets every feature (incl. reason.sh)
+bold "2b. Codex CLI skill symlink"
+CODEX_LINK="$HOME/.codex/skills/second-opinion"
+if [[ -L "$CODEX_LINK" ]]; then
+  target="$(readlink "$CODEX_LINK")"
+  if [[ "$target" == "$REPO_DIR" ]]; then
+    ok "already symlinked: $CODEX_LINK → $REPO_DIR"
+  else
+    warn "symlink points elsewhere: $CODEX_LINK → $target"
+    if ask "Replace symlink to point at this repo?"; then
+      rm "$CODEX_LINK"; ln -s "$REPO_DIR" "$CODEX_LINK"; ok "updated"
+    fi
+  fi
+elif [[ -e "$CODEX_LINK" ]]; then
+  fail "$CODEX_LINK exists and is NOT a symlink (stale copy?) — move it aside and re-run to link this repo"
+elif [[ -d "$HOME/.codex" ]]; then
+  if ask "Create symlink so Codex CLI can find the skill?"; then
+    mkdir -p "$HOME/.codex/skills"
+    ln -s "$REPO_DIR" "$CODEX_LINK"
+    ok "created $CODEX_LINK → $REPO_DIR"
+  fi
+else
+  warn "~/.codex not found — skipping Codex skill link"
+fi
+echo
+
 # 3. PATH wrapper
 bold "3. CLI wrapper on PATH"
 BIN_DIR="$HOME/.local/bin"
